@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+permissions:
+  id-token: write # Required to fetch the OIDC token for AWS authentication
+  contents: read  # Required for 'actions/checkout' to read your repository code
+
+
+
+jobs:
+  build:
+    name: Build and analyze
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # IMPORTANT: Replace 'YOUR_IAM_ROLE_ARN_GOES_HERE' with the actual ARN of your IAM role from AWS!
+          role-to-assume: arn:aws:iam::760715349705:role/ci-cd
+          aws-region: ap-southeast-1 # Example: us-east-1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # IMPORTANT: Replace 'YOUR_IAM_ROLE_ARN_GOES_HERE' with the actual ARN of your IAM role from AWS!
+          role-to-assume: arn:aws:iam::760715349705:role/ci-cd
+          aws-region: ap-southeast-1 # Example: us-east-1
+      - name: Send Email Notification (on success)
+        if: success()
+        run: |
+          aws ses send-email \
+            --from 'akr813703@gmail.com' \
+            --destination 'ToAddresses="akr8137035@gmail.com"' \
+            --message 'Subject={Data="✅ Build Success - ${{ github.repository }}"},Body={Text={Data="Build for ${{ github.repository }} on branch `${{ github.ref_name}}` was successful!\n\nCommit: `${{ github.sha}}`\nWorkflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}}' \
+            --region ap-southeast-1
+
+      - name: Send Email Notification (on failure)
+        if: failure()
+        run: |
+          aws ses send-email \
+            --from 'akr813703@gmail.com' \
+            --destination 'ToAddresses="akr8137035@gmail.com"' \
+            --message 'Subject={Data="❌ Build FAILED - ${{ github.repository }}"},Body={Text={Data="*ALERT:* Build for ${{ github.repository }} on branch `${{ github.ref_name}}` *FAILED!*\n\nCommit: `${{ github.sha}}`\n*Please review logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}}' \
+            --region ap-southeast-1
+
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'zulu' # Alternative distribution options are available.
+      - name: Cache SonarQube packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Build and analyze
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=github-action-CICD -Dsonar.projectName='github-action CICD'
+      - name: Verify JAR
+        if: success() # Step-level condition: only run if previous steps were successful
+        run: ls -l target/
